@@ -1,0 +1,268 @@
+name: Build IDT APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Create clean Android project
+        shell: bash
+        run: |
+          set -e
+          mkdir -p idt/app/src/main/java/za/co/idt
+          mkdir -p idt/app/src/main/res/values
+
+          cat > idt/settings.gradle <<'EOF'
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          rootProject.name = "IDT"
+          include(":app")
+          EOF
+
+          cat > idt/build.gradle <<'EOF'
+          plugins {
+              id 'com.android.application' version '8.7.3' apply false
+          }
+          EOF
+
+          cat > idt/gradle.properties <<'EOF'
+          org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
+          android.useAndroidX=false
+          EOF
+
+          cat > idt/app/build.gradle <<'EOF'
+          plugins {
+              id 'com.android.application'
+          }
+
+          android {
+              namespace 'za.co.idt'
+              compileSdk 35
+
+              defaultConfig {
+                  applicationId "za.co.idt"
+                  minSdk 23
+                  targetSdk 35
+                  versionCode 1
+                  versionName "1.0"
+              }
+          }
+          EOF
+
+          cat > idt/app/src/main/AndroidManifest.xml <<'EOF'
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <application
+                  android:theme="@style/AppTheme"
+                  android:label="IDT Sign-Off"
+                  android:allowBackup="false"
+                  android:supportsRtl="true">
+                  <activity
+                      android:name=".MainActivity"
+                      android:screenOrientation="portrait"
+                      android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+              </application>
+          </manifest>
+          EOF
+
+          cat > idt/app/src/main/res/values/styles.xml <<'EOF'
+          <resources>
+              <style name="AppTheme" parent="@android:style/Theme.Material.NoActionBar">
+                  <item name="android:fontFamily">sans</item>
+                  <item name="android:colorAccent">#39FF14</item>
+                  <item name="android:statusBarColor">#000000</item>
+                  <item name="android:navigationBarColor">#000000</item>
+                  <item name="android:windowLightStatusBar">false</item>
+              </style>
+          </resources>
+          EOF
+
+          cat > idt/app/src/main/java/za/co/idt/MainActivity.java <<'EOF'
+          package za.co.idt;
+
+          import android.app.Activity;
+          import android.os.Bundle;
+          import android.graphics.Color;
+          import android.graphics.Paint;
+          import android.graphics.Canvas;
+          import android.graphics.pdf.PdfDocument;
+          import android.content.Intent;
+          import android.net.Uri;
+          import android.view.View;
+          import android.widget.*;
+          import java.io.File;
+          import java.io.FileOutputStream;
+
+          public class MainActivity extends Activity {
+              LinearLayout page;
+              EditText customer, site, date, installer, notes;
+
+              int dp(int n) {
+                  return (int)(n * getResources().getDisplayMetrics().density + 0.5f);
+              }
+
+              EditText input(String hint) {
+                  EditText e = new EditText(this);
+                  e.setHint(hint);
+                  e.setTextColor(Color.WHITE);
+                  e.setHintTextColor(Color.LTGRAY);
+                  e.setBackgroundColor(Color.rgb(35,35,35));
+                  e.setPadding(dp(10), dp(6), dp(10), dp(6));
+                  page.addView(e, new LinearLayout.LayoutParams(-1, dp(52)));
+                  return e;
+              }
+
+              TextView title(String text, int size, int color) {
+                  TextView t = new TextView(this);
+                  t.setText(text);
+                  t.setTextSize(size);
+                  t.setTextColor(color);
+                  t.setPadding(0, dp(10), 0, dp(6));
+                  return t;
+              }
+
+              Button action(String text) {
+                  Button b = new Button(this);
+                  b.setText(text);
+                  b.setTextColor(Color.BLACK);
+                  b.setBackgroundColor(Color.rgb(57,255,20));
+                  return b;
+              }
+
+              @Override public void onCreate(Bundle state) {
+                  super.onCreate(state);
+
+                  ScrollView scroll = new ScrollView(this);
+                  page = new LinearLayout(this);
+                  page.setOrientation(LinearLayout.VERTICAL);
+                  page.setPadding(dp(14), dp(10), dp(14), dp(18));
+                  page.setBackgroundColor(Color.rgb(12,12,12));
+                  scroll.addView(page);
+
+                  page.addView(title("I.D.T. STEELWORKS AND ENGINEERING", 21, Color.rgb(57,255,20)));
+                  page.addView(title("INSTALLATION SIGN-OFF", 17, Color.WHITE));
+
+                  page.addView(title("Report details", 18, Color.rgb(57,255,20)));
+                  customer = input("Customer name");
+                  site = input("Site / project");
+                  date = input("Date");
+                  installer = input("Installer name");
+
+                  page.addView(title("Items", 18, Color.rgb(57,255,20)));
+                  for (int i = 1; i <= 10; i++) {
+                      page.addView(title("ITEM " + i, 15, Color.rgb(255,140,0)));
+                      input("Item " + i + " - description / quantity / status / quality");
+                  }
+
+                  page.addView(title("Notes", 18, Color.rgb(57,255,20)));
+                  notes = input("Notes and customer acceptance");
+
+                  Button pdf = action("CREATE PDF REPORT");
+                  page.addView(pdf);
+                  pdf.setOnClickListener(v -> createPdf());
+
+                  TextView footer = title(
+                      "I.D.T. STEELWORKS AND ENGINEERING\nUnit 7, Concert Park, Joe Mark's Boulevard, Retreat\n0645558411 | iwardio@idtsteel.co.za",
+                      12, Color.LTGRAY);
+                  page.addView(footer);
+
+                  setContentView(scroll);
+              }
+
+              String value(EditText e) {
+                  return e == null ? "" : e.getText().toString();
+              }
+
+              void createPdf() {
+                  try {
+                      File folder = new File(getExternalFilesDir(null), "reports");
+                      folder.mkdirs();
+                      File file = new File(folder, "IDT_Report_" + System.currentTimeMillis() + ".pdf");
+
+                      PdfDocument pdf = new PdfDocument();
+                      PdfDocument.Page page = pdf.startPage(
+                          new PdfDocument.PageInfo.Builder(595, 842, 1).create());
+                      Canvas canvas = page.getCanvas();
+                      Paint paint = new Paint();
+                      paint.setColor(Color.BLACK);
+                      paint.setTextSize(11);
+
+                      int y = 30;
+                      canvas.drawText("I.D.T. STEELWORKS AND ENGINEERING", 25, y, paint);
+                      y += 18;
+                      canvas.drawText("INSTALLATION SIGN-OFF", 25, y, paint);
+                      y += 22;
+                      canvas.drawText("Customer: " + value(customer), 25, y, paint);
+                      y += 16;
+                      canvas.drawText("Site: " + value(site), 25, y, paint);
+                      y += 16;
+                      canvas.drawText("Date: " + value(date), 25, y, paint);
+                      y += 16;
+                      canvas.drawText("Installer: " + value(installer), 25, y, paint);
+                      y += 24;
+                      canvas.drawText("Notes: " + value(notes), 25, y, paint);
+                      y += 35;
+                      canvas.drawText("Customer signature: __________________________", 25, y, paint);
+                      y += 30;
+                      canvas.drawText("Installer signature: __________________________", 25, y, paint);
+                      y += 40;
+                      canvas.drawText("0645558411 | iwardio@idtsteel.co.za", 25, y, paint);
+
+                      pdf.finishPage(page);
+                      FileOutputStream out = new FileOutputStream(file);
+                      pdf.writeTo(out);
+                      out.close();
+                      pdf.close();
+
+                      Intent share = new Intent(Intent.ACTION_SEND);
+                      share.setType("application/pdf");
+                      share.putExtra(Intent.EXTRA_STREAM, Uri.parse(file.toURI().toString()));
+                      startActivity(Intent.createChooser(share, "Share IDT PDF"));
+                  } catch (Exception ex) {
+                      Toast.makeText(this, "PDF error: " + ex.getMessage(), Toast.LENGTH_LONG).show();
+                  }
+              }
+          }
+          EOF
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
+
+      - name: Build APK
+        working-directory: idt
+        run: gradle assembleDebug --no-daemon
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: IDT-APK
+          path: idt/app/build/outputs/apk/debug/app-debug.apk
